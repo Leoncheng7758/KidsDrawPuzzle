@@ -15,8 +15,10 @@ from kivy.clock import Clock
 from kivy.uix.popup import Popup
 from kivy.uix.image import Image
 from kivy.uix.scatter import Scatter
+from kivy.uix.relativelayout import RelativeLayout
 import random
 from datetime import datetime
+import os
 
 Window.clearcolor = (0.95, 0.98, 1, 1)
 
@@ -49,106 +51,158 @@ class DrawingWidget(Widget):
             return True
         return super().on_touch_move(touch)
 
+class PuzzlePiece(Scatter):
+    def __init__(self, image_source, correct_pos, **kwargs):
+        super().__init__(**kwargs)
+        self.correct_pos = correct_pos
+        self.do_rotation = False
+        self.do_scale = False
+        self.size_hint = (None, None)
+        self.size = (180, 180)
+        
+        img = Image(source=image_source, size=self.size, allow_stretch=True)
+        self.add_widget(img)
+    
+    def on_touch_up(self, touch):
+        if self.collide_point(*touch.pos):
+            # Snap to correct position if close enough
+            dx = abs(self.pos[0] - self.correct_pos[0])
+            dy = abs(self.pos[1] - self.correct_pos[1])
+            if dx < 50 and dy < 50:
+                self.pos = self.correct_pos
+                self.parent.check_puzzle_complete()
+        return super().on_touch_up(touch)
+
+class PuzzleArea(RelativeLayout):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.pieces = []
+        self.completed = False
+    
+    def load_puzzle(self, animal_name):
+        self.clear_widgets()
+        self.pieces = []
+        self.completed = False
+        
+        # For demo, use placeholder images or colored rectangles if no real images
+        piece_positions = [
+            (100, 300), (300, 300), (500, 300),
+            (100, 100), (300, 100), (500, 100)
+        ]
+        
+        for i, pos in enumerate(piece_positions):
+            # Use colored rectangle as placeholder (in real app, use cut images)
+            color = (random.random(), random.random(), random.random(), 1)
+            piece = PuzzlePiece('placeholder', pos, size=(180, 180))
+            
+            # Add colored background for demo
+            with piece.canvas.before:
+                Color(*color)
+                Rectangle(pos=(0,0), size=piece.size)
+            
+            # Random initial position
+            piece.pos = (random.randint(50, 600), random.randint(50, 400))
+            self.add_widget(piece)
+            self.pieces.append(piece)
+    
+    def check_puzzle_complete(self):
+        if all(abs(p.pos[0] - p.correct_pos[0]) < 30 and abs(p.pos[1] - p.correct_pos[1]) < 30 for p in self.pieces):
+            if not self.completed:
+                self.completed = True
+                # Success popup will be handled by parent
+
 class KidsDrawPuzzleApp(App):
     def build(self):
         root = FloatLayout()
-        self.drawing = DrawingWidget(size_hint=(0.68, 0.75), pos_hint={'center_x': 0.35, 'y': 0.18})
+        self.drawing = DrawingWidget(size_hint=(0.65, 0.72), pos_hint={'center_x': 0.34, 'y': 0.20})
         root.add_widget(self.drawing)
         
         # Title
-        title = Label(text='🎨 儿童绘图益智乐园 🧩', font_size=48, pos_hint={'center_x':0.5, 'y':0.9}, size_hint=(0.8, 0.1), color=(0.1,0.2,0.8,1), bold=True)
+        title = Label(text='🎨 儿童绘图益智乐园 🧩', font_size=42, pos_hint={'center_x':0.5, 'y':0.92}, size_hint=(0.8, 0.1), color=(0.1,0.2,0.8,1), bold=True)
         root.add_widget(title)
         
         # Color palette
         colors = [(1,0,0,1),(1,0.65,0,1),(1,1,0,1),(0.2,0.8,0.2,1),(0,0.6,1,1),(0.5,0,1,1),(1,0,0.8,1),(0.3,0.3,0.3,1)]
-        color_grid = GridLayout(cols=4, spacing=12, size_hint=(0.28, 0.35), pos_hint={'x': 0.72, 'y': 0.52})
+        color_grid = GridLayout(cols=4, spacing=10, size_hint=(0.28, 0.32), pos_hint={'x': 0.72, 'y': 0.55})
         for col in colors:
-            btn = Button(background_color=col, size_hint_y=None, height=65)
+            btn = Button(background_color=col, size_hint_y=None, height=60)
             btn.bind(on_press=lambda b, c=col: self.change_color(c))
             color_grid.add_widget(btn)
         root.add_widget(color_grid)
         
         # Tools
-        tool_box = BoxLayout(orientation='vertical', spacing=12, size_hint=(0.26, 0.42), pos_hint={'x':0.73, 'y':0.08})
+        tool_box = BoxLayout(orientation='vertical', spacing=10, size_hint=(0.27, 0.40), pos_hint={'x':0.73, 'y':0.08})
         
         # Brush size
-        self.size_label = Label(text='🖌 粗细: 10', size_hint_y=None, height=50, font_size=24)
+        self.size_label = Label(text='🖌 粗细: 10', size_hint_y=None, height=45, font_size=22)
         tool_box.add_widget(self.size_label)
         
-        sizes = BoxLayout(spacing=8)
-        for sz in [5,10,18,28]:
-            b = Button(text=str(sz), background_color=(0.9,0.9,0.95,1))
+        sizes = BoxLayout(spacing=6)
+        for sz in [5,10,18,28,40]:
+            b = Button(text=str(sz), background_color=(0.9,0.9,0.95,1), font_size=20)
             b.bind(on_press=lambda inst, s=sz: self.set_size(s))
             sizes.add_widget(b)
         tool_box.add_widget(sizes)
         
         # Other buttons
         for text, color, func in [
-            ('🧼 橡皮', (0.95,0.95,0.6,1), self.eraser),
-            ('🗑 清空', (1,0.5,0.5,1), self.clear_all),
-            ('💾 保存', (0.4,0.85,0.4,1), self.save_to_gallery),
-            ('🧩 动物拼图', (0.5,0.7,1,1), self.start_puzzle)
+            ('🧼 橡皮擦', (0.95,0.95,0.6,1), self.eraser),
+            ('🗑 清空画布', (1,0.5,0.5,1), self.clear_all),
+            ('💾 保存作品', (0.4,0.85,0.4,1), self.save_to_gallery),
+            ('🧩 开始拼图', (0.4,0.7,1,1), self.start_puzzle)
         ]:
-            btn = Button(text=text, background_color=color, size_hint_y=None, height=72, font_size=26)
+            btn = Button(text=text, background_color=color, size_hint_y=None, height=68, font_size=24)
             btn.bind(on_press=func)
             tool_box.add_widget(btn)
         
         root.add_widget(tool_box)
         
-        # Load sounds
-        self.sounds = {}
-        sound_files = {'click': 'click.mp3', 'success': 'success.mp3', 'bg': 'background.mp3'}
-        for key, file in sound_files.items():
-            self.sounds[key] = SoundLoader.load(file) if SoundLoader.load(file) else None
+        # Puzzle area (hidden initially)
+        self.puzzle_area = PuzzleArea(size_hint=(0.65, 0.72), pos_hint={'center_x': 0.34, 'y': 0.20})
+        self.puzzle_area.opacity = 0
+        root.add_widget(self.puzzle_area)
         
-        if self.sounds['bg']:
-            self.sounds['bg'].loop = True
-            Clock.schedule_once(lambda dt: self.sounds['bg'].play(), 0.5)
+        # Load sounds (placeholders)
+        self.sounds = {}
+        # Note: Add real mp3 files for full experience
         
         return root
     
     def change_color(self, color):
         self.drawing.current_color = color
         self.drawing.mode = 'draw'
-        if self.sounds.get('click'): self.sounds['click'].play()
+        self.drawing.opacity = 1
+        self.puzzle_area.opacity = 0
     
     def set_size(self, size):
         self.drawing.line_width = size
         self.size_label.text = f'🖌 粗细: {size}'
-        if self.sounds.get('click'): self.sounds['click'].play()
     
     def eraser(self, *args):
         self.drawing.current_color = (1,1,1,1)
-        if self.sounds.get('click'): self.sounds['click'].play()
     
     def clear_all(self, *args):
         self.drawing.canvas.clear()
         with self.drawing.canvas.before:
             Color(1,1,1,1)
             self.drawing.bg_rect = Rectangle(pos=self.drawing.pos, size=self.drawing.size)
-        if self.sounds.get('click'): self.sounds['click'].play()
     
     def save_to_gallery(self, *args):
         filename = f'kids_drawing_{datetime.now().strftime("%Y%m%d_%H%M")}.png'
         self.drawing.export_to_png(filename)
-        
-        content = Label(text=f'✅ 已保存！\n文件: {filename}\n\n在 iPad 上可使用 plyer 进一步保存到相册')
+        content = Label(text=f'✅ 已保存到本地！\n{filename}\n\n(iPad打包后可集成plyer保存到相册)')
         popup = Popup(title='保存成功 🎉', content=content, size_hint=(0.7, 0.4))
         popup.open()
-        if self.sounds.get('success'): self.sounds['success'].play()
     
     def start_puzzle(self, *args):
-        if self.sounds.get('click'): self.sounds['click'].play()
+        self.drawing.opacity = 0
+        self.puzzle_area.opacity = 1
+        self.puzzle_area.load_puzzle('可爱小猫')
         
-        animals = ['可爱小猫', '忠实小狗', '大熊宝宝', '小兔子', '企鹅宝宝']
-        animal = random.choice(animals)
-        
-        popup = Popup(title='🧩 ' + animal + ' 拼图', 
-                     content=Label(text='拖拽拼图块到正确位置！\n\n更多智能拼图和真实图片即将添加~', font_size=26),
-                     size_hint=(0.75, 0.55))
+        popup = Popup(title='🧩 真实拖拽拼图', 
+                     content=Label(text='拖动拼图块到正确位置！\n靠近时会自动吸附~', font_size=26),
+                     size_hint=(0.75, 0.4))
         popup.open()
-        
-        if self.sounds.get('success'): self.sounds['success'].play()
 
 if __name__ == '__main__':
     KidsDrawPuzzleApp().run()
